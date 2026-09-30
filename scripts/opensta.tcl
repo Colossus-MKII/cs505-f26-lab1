@@ -33,7 +33,7 @@ if {${REPORT_POWER} == 1} {
     set_power_activity -input -activity 0.2
     report_power -digits 6 > ${OUTDIR}/power-switching.rpt
 } elseif {${REPORT_POWER} == 2} {
-    read_vcd -scope adder32_testbench/dut ${VCD_FILENAME}
+    read_vcd -scope ${TB_DUT_NAME}/dut ${VCD_FILENAME}
     report_power -digits 6 > ${OUTDIR}/power-vcd.rpt
 } else {
     report_checks -digits 8 -endpoint_path_count 1000 -group_path_count 1000 > ${OUTDIR}/timing-longest-paths.rpt
