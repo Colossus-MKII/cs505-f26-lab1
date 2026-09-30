@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 module adder32_testbench ();
     reg  [31:0] tb_a;
     reg  [31:0] tb_b;

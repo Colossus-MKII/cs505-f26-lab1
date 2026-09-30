@@ -4,6 +4,7 @@
         $finish; \
     end
 
+`timescale 1ns/1ps
 module counter32_testbench ();
     reg          tb_clock;
     reg          tb_reset_n;
