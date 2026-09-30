@@ -96,7 +96,7 @@ $(BASE_OUTDIR)/%/sim/$(TESTBENCH_TOP_NAME).vcd: $(BASE_OUTDIR)/%/sim/$(VERILATOR
 	export STA_CLOCK_NS=$(shell cat $(BASE_OUTDIR)/$*/sta/timing-min-clock.rpt); \
 	export STA_REPORT_POWER=2; \
 	export STA_VCD_FILENAME=$@; \
-	export STA_TB_DUT_NAME=$(TESTBENCH_TOP_NAME)/dut; \
+	export STA_TB_DUT_NAME=$(TESTBENCH_TOP_NAME); \
 	$(OPENSTA) -no_splash -exit $(OPENSTA_SCRIPT) 2>&1 | tee $(BASE_OUTDIR)/$*/sta/stdout-power-vcd.log
 
 ###############################################################################
