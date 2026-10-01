@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-import sys
 import os
+import json
 import time
 import subprocess as sp
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 # ANSI escape sequences
@@ -31,66 +32,63 @@ TECH_LIBS = {
     }
 }
 
-# waits until less than a maximum number of processes is running
-def wait_until_nprocs_leq_target(procs, target, start_time, n_pending):
-    while len(procs) > target:
-        seconds_elapsed = time.time() - start_time
-        print(f"[{seconds_elapsed:#.2f} s] {len(procs)} jobs running; {n_pending} jobs pending")
-        for jobname, p in procs:
-            exit_code = p.poll()
-            if exit_code != None:
-                print((GREEN if exit_code == 0 else RED) + f"Job \"{jobname}\" (PID {p.pid}) finished with exit code {exit_code}" + RESET)
-                procs.remove((jobname, p))
-        time.sleep(1) 
-
 # builds the cross product of a list of target modules and technology libraries
-def build_all_targets(target_list: list, techlib_list: dict, build_dirname: str, max_parallel_jobs: int) -> None:
+def build_all_targets(target_list: dict, techlib_list: list, build_dirname: str,
+                      max_parallel_jobs: int, force: bool = False) -> int:
     print(f"Building {len(target_list)} modules using {len(techlib_list)} technology libraries")
     print(f"    Modules: {[i for i in target_list]}")
     print(f"    Techlibs: {techlib_list}")
-    Path(build_dirname).mkdir(parents=False, exist_ok=True)
-
+    Path(build_dirname).mkdir(parents=True, exist_ok=True)
     start_time = time.time()
+    if max_parallel_jobs < 1:
+        raise ValueError("max_parallel_jobs must be positive")
 
-    TOTAL_JOBS = len(target_list) * len(techlib_list)
-    n_pending = TOTAL_JOBS
+    def build_one(target_name, techlib_name):
+        target_fullname = os.path.join(build_dirname, target_name, techlib_name)
+        target_dir = Path(target_fullname)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        config = {"target": target_list[target_name], "techlib": TECH_LIBS[techlib_name]}
+        config_text = json.dumps(config, indent=2, sort_keys=True) + "\n"
+        config_file = target_dir / ".config.json"
+        # Configuration changes invalidate the existing synthesized netlist.
+        if not config_file.exists() or config_file.read_text() != config_text:
+            config_file.write_text(config_text)
+        print(f"Building {target_name}/{techlib_name}", flush=True)
+        env = os.environ.copy()
+        env.update({
+            "TECHLIB_LIB_FILENAME": TECH_LIBS[techlib_name]["lib"],
+            "TECHLIB_SIM_FILENAMES": " ".join(TECH_LIBS[techlib_name]["sim"]),
+            "MODULE_SOURCES": target_list[target_name]["sources"],
+            "MODULE_TOP_NAME": target_list[target_name]["top"],
+            "MODULE_SDC_FILENAME": target_list[target_name]["sdc"],
+            "TESTBENCH_SOURCES": target_list[target_name]["tb sources"],
+            "TESTBENCH_TOP_NAME": target_list[target_name]["tb top"],
+            "CONFIG_FILENAME": str(config_file),
+        })
+        command = ["make", "--no-print-directory", "--no-builtin-rules",
+                   f"BASE_OUTDIR={build_dirname}", f"TARGET_DIR={target_fullname}",
+                   target_fullname]
+        if force:
+            command.append("--always-make")
+        with (target_dir / "stdout.log").open("w") as out_file, \
+                (target_dir / "stderr.log").open("w") as err_file:
+            result = sp.run(command, env=env, stdout=out_file, stderr=err_file)
+        return target_fullname, result.returncode
 
-    assert max_parallel_jobs > 0
-    procs = []
-    log_file_handles = []
-    try:
-        for target_name in target_list:
-            for techlib_name in techlib_list:
-                if len(procs) >= max_parallel_jobs:
-                    wait_until_nprocs_leq_target(procs, max_parallel_jobs - 1, start_time, n_pending)
-                
-                target_fullname = os.path.join(build_dirname, target_name, techlib_name)
-                Path(target_fullname).mkdir(parents=True, exist_ok=True)
-                print(f"Building target name \"{target_name}\" using technology library \"{techlib_name}\" (output dir: \"{target_fullname}\")")
-                
-                out_file = open(f"{target_fullname}/stdout.log", "w", encoding="utf-8")
-                err_file = open(f"{target_fullname}/stderr.log", "w", encoding="utf-8")
-                log_file_handles.extend([out_file, err_file])
-
-                env = os.environ.copy()
-                env["TECHLIB_LIB_FILENAME"] = TECH_LIBS[techlib_name]["lib"]
-                env["TECHLIB_SIM_FILENAMES"] = " ".join(TECH_LIBS[techlib_name]["sim"])
-                env["MODULE_SOURCES"] = target_list[target_name]["sources"]
-                env["MODULE_TOP_NAME"] = target_list[target_name]["top"]
-                env["MODULE_SDC_FILENAME"] = target_list[target_name]["sdc"]
-                env["TESTBENCH_SOURCES"] = target_list[target_name]["tb sources"]
-                env["TESTBENCH_TOP_NAME"] = target_list[target_name]["tb top"]
-                # print(env)
-
-                proc = sp.Popen(args=["make", target_fullname, "-rd"], env=env, stdout=out_file, stderr=err_file)
-
-                procs.append((target_fullname, proc))
-                n_pending -= 1
-
-        wait_until_nprocs_leq_target(procs, 0, start_time, n_pending)
-    finally:
-        for f in log_file_handles:
-            f.close()
+    failed = []
+    with ThreadPoolExecutor(max_workers=max_parallel_jobs) as executor:
+        futures = [executor.submit(build_one, target, tech)
+                   for target in target_list for tech in techlib_list]
+        for future in as_completed(futures):
+            target_name, exit_code = future.result()
+            color = GREEN if exit_code == 0 else RED
+            print(color + f"[{time.time() - start_time:.2f} s] {target_name}: "
+                  f"exit code {exit_code}" + RESET, flush=True)
+            if exit_code:
+                failed.append(target_name)
+    if failed:
+        print(RED + f"Failed targets: {', '.join(failed)}" + RESET)
+    return 1 if failed else 0
 
 # formats target modules in a standardized way
 def format_target(sources : list, topname : str, sdc_filename: str, tb_sources: list, tb_top_name: str) -> dict:
