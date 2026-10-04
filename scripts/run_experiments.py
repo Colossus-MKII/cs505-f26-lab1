@@ -120,8 +120,15 @@ def main():
         submission = ROOT / 'submission.zip'
         with zipfile.ZipFile(submission, 'w', zipfile.ZIP_DEFLATED) as archive:
             for rel in ('src/adder32/adder32-kogge-stone.v',
-                        'src/adder32/adder32-brent-kung.v', 'report.pdf'):
+                        'src/adder32/adder32-brent-kung.v', 'report.pdf',
+                        'src/adder32/adder32-testbench.v',
+                        'src/counter32/counter32-testbench.v'):
                 archive.write(ROOT / rel, arcname=Path(rel).name)
+        testbenches = ROOT / 'testbenches.zip'
+        with zipfile.ZipFile(testbenches, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for circuit in ('adder32', 'counter32'):
+                source = ROOT / 'src' / circuit / f'{circuit}-testbench.v'
+                archive.write(source, arcname=source.name)
         current_build_inputs = {name: digest(ROOT / name) for name in build_inputs}
         if current_build_inputs != build_inputs:
             raise ValueError('Build inputs changed during the experiment; rerun the full workflow.')
@@ -135,6 +142,7 @@ def main():
         manifest['status'] = 'complete'
         manifest['completed_at_utc'] = stamp()
         manifest['submission_sha256'] = digest(submission)
+        manifest['testbenches_sha256'] = digest(testbenches)
         save()
         print(f'Complete: {ROOT / "report.pdf"}, {submission}', flush=True)
     except (subprocess.CalledProcessError, OSError, ValueError) as error:

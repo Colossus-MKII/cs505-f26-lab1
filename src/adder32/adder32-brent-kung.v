@@ -1,5 +1,3 @@
-// 32-bit Brent-Kung parallel-prefix adder with 57 prefix-combine nodes.
-// Compile this file as an alternative implementation of module adder32.
 module adder32 (
     input  [31:0] a,
     input  [31:0] b,
@@ -14,8 +12,6 @@ module adder32 (
 
     genvar stage, bit_index;
     generate
-        // Reduction: combine endpoints of blocks of 2, 4, 8, 16, and 32.
-        // This forms complete prefixes at bits 1, 3, 7, 15, and 31.
         for (stage = 0; stage < 5; stage = stage + 1) begin : reduction_stage
             wire [31:0] p_in, g_in;
             wire [31:0] p_out, g_out;
@@ -39,8 +35,6 @@ module adder32 (
             end
         end
 
-        // Distribution: distances 8, 4, 2, and 1 fill the missing prefixes.
-        // At distance d, update endpoints 3*d-1, 5*d-1, 7*d-1, ... .
         for (stage = 0; stage < 4; stage = stage + 1) begin : distribution_stage
             wire [31:0] p_in, g_in;
             wire [31:0] p_out, g_out;
@@ -65,8 +59,6 @@ module adder32 (
             end
         end
 
-        // Each final prefix now spans [bit_index:0]. Retain the original
-        // bit propagate for sums and include cin explicitly in every carry.
         for (bit_index = 0; bit_index < 32; bit_index = bit_index + 1) begin : result_bit
             assign carry[bit_index+1] = distribution_stage[3].g_out[bit_index]
                 | (distribution_stage[3].p_out[bit_index] & cin);

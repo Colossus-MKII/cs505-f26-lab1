@@ -1,5 +1,3 @@
-// 32-bit Kogge-Stone parallel-prefix adder.
-// Compile this file as an alternative implementation of module adder32.
 module adder32 (
     input  [31:0] a,
     input  [31:0] b,
@@ -12,8 +10,6 @@ module adder32 (
 
     assign bit_p = a ^ b;
 
-    // Five stages extend each prefix by distances 1, 2, 4, 8, and 16.
-    // A prefix pair combines as (G_hi | P_hi & G_lo, P_hi & P_lo).
     genvar stage, bit_index;
     generate
         for (stage = 0; stage < 5; stage = stage + 1) begin : prefix_stage
@@ -39,8 +35,7 @@ module adder32 (
             end
         end
 
-        // Every final prefix spans [bit_index:0]. Carry-in participates in
-        // every carry independently, without a serial carry chain.
+
         for (bit_index = 0; bit_index < 32; bit_index = bit_index + 1) begin : result_bit
             assign carry[bit_index+1] = prefix_stage[4].g_out[bit_index]
                 | (prefix_stage[4].p_out[bit_index] & cin);

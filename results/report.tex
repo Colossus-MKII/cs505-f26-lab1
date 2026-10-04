@@ -1,14 +1,14 @@
 \documentclass[10pt,letterpaper]{article}
 \usepackage[margin=0.7in]{geometry}
 \usepackage[T1]{fontenc}
-\usepackage{amsmath,booktabs,longtable,tabularx,graphicx,hyperref}
+\usepackage{amsmath,booktabs,longtable,tabularx,graphicx,hyperref,fancyvrb,upquote}
 \hypersetup{colorlinks=true,urlcolor=blue,linkcolor=blue}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{5pt}
 \setlength{\emergencystretch}{3em}
 \title{CS 505 Fall 2026 --- Lab 1\\32-bit Adder Design Space Exploration}
 \author{Reproducible implementation and experimental report}
-\date{October 01, 2026}
+\date{October 04, 2026}
 \begin{document}
 \maketitle
 
@@ -39,6 +39,13 @@ the supplied cell simulation models and produces the VCD used in a separate
 power analysis. Thus correctness, area, timing, and power refer to the same
 mapped implementation. All 18 mapped simulations passed; the analyzer also
 requires nonzero VCD activity annotation and complete reports.
+
+The supplied testbenches were modified for this experiment. Their source files
+are included in \texttt{submission.zip}; Appendix~\ref{app:testbenches}
+summarizes their workloads and verification. All 18 mapped PASS results and the reported
+VCD-based power estimates use these enhanced benches, with identical stimuli
+across architectures and technologies. Using the instructor's original
+stimulus can produce different VCD power estimates.
 
 The enhanced adder bench compares all 33 result bits, including carry-out,
 uses directed full/partial carry chains and overflow cases with both values
@@ -80,8 +87,9 @@ artifact with our own explicit headers, not a purported official template.
 \section{Measured PPA results}
 The tables report total power (internal, switching, and leakage combined).
 All rows passed their mapped testbench. Energy here follows the handout's
-$PT$ definition using the minimum period. For VCD power, $P$ is measured at
-the fixed simulation workload rate: its $PT$ value is an assignment-defined
+$PT$ definition using the minimum period. VCD power uses activity recorded
+at the fixed simulation workload rate; both power runs retain the
+minimum-period STA clock constraints. Its $PT$ value is an assignment-defined
 metric, not the directly measured energy per simulated transaction.
 
 
@@ -178,84 +186,153 @@ Brent--Kung & 1150 & 3.279 & 414.5 & 408.7 & 1359 & 1340 \\
 \begin{center}\includegraphics[width=\linewidth]{\detokenize{/common/home/jw2046/cs505-f26-lab1/results/counter32-comparison.pdf}}\end{center}
 
 \section{Qualitative questions}
-\subsection{1. What is a netlist, and why analyze it?}
-\texttt{synth/netlist.v} describes the cells and connections that Yosys actually
-selected after flattening, optimization, and technology mapping. Behavioral
-Verilog and prefix equations do not identify cell sizes, input capacitances,
-timing arcs, leakage, or internal-power tables. Those depend on the selected
-library. For this experiment, the source node counts are fixed at 129 and 57,
-but the mapped area and delay vary by technology and counter constant folding.
-Analyzing the mapped netlist associates the circuit with those physical cell
-models and accounts for logic that was optimized away.
+\subsection{What is a netlist, and why analyze it instead of the Verilog source?}
+The original Verilog describes operations and logic connections, but does
+not select technology-specific cells with known area, delay, and power.
+Yosys optimizes this logic and maps it to library cells;
+\texttt{synth/netlist.v} lists those cells and their connections. PPA analysis
+combines this mapped circuit with the library's physical models, so it
+reflects the selected technology and synthesis optimizations. The source
+alone does not provide that information.
 
-\subsection{2. Two reasons an implementation might run faster than STA suggests}
-First, STA can include a structurally connected path that cannot be logically
-sensitized by a legal input transition (a false path), or use combinations of
-worst-case transitions that cannot occur together. A sensitization proof and
-appropriate constraints can remove that pessimism. A merely rare path is
-still relevant if correctness is required for every legal input.
-Second, real operating voltage, temperature, process, input slew, or load may
-be more favorable than the conditions used by the cell timing model. Cell
-characterization is a model; actual silicon under more favorable conditions
-can have a shorter delay. These are possible explanations, not measured
-speedups or proven false paths in these adders. Our supplied files use typical
-corners; no corner sweep or physical implementation was performed. Missing
-routed parasitics can also make this flow optimistic, so exceeding its
-frequency estimate is not guaranteed.
+\subsection{Two reasons an implementation might run faster than STA suggests}
+\begin{itemize}
+\item STA may consider a path that valid inputs can never activate. If this
+is proved for the reported longest path, it can be excluded; the longest
+remaining valid path then sets the timing limit and may allow a faster clock.
+\item Actual gates may run faster under more favorable voltage, temperature,
+or manufacturing conditions than the library model assumes.
+\end{itemize}
+These possibilities were not demonstrated in this experiment.
 
-\subsection{3. How can the original testbenches be improved?}
-Random testing alone misses very long carry chains with high probability, and
-the original adder bench checks only the low 32 sum bits. The implemented
-bench explicitly checks $\{cout,sum\}$, exercises every carry-chain length,
-tests both carry-in values, and makes failures terminate with a nonzero status.
-Deterministic pseudorandom inputs reproduce failures across simulators. The
-counter bench checks reset during operation as well as normal increments.
-Formal proof covers every input/state, including carry-out and wraparound;
-mapped-netlist simulation then checks technology-model integration. Four-state
-Icarus simulation complements Verilator's mostly two-state simulation.
+\subsection{How can the original testbenches be improved?}
+Both benches were improved:
+\begin{itemize}
+\item \textbf{Adder:} The original connects \texttt{cout} but checks only
+\texttt{sum}; random tests can miss long carry chains. The enhanced bench
+checks $\{cout,sum\}$, every carry-chain length, overflow, and both carry-in
+values, with reproducible pseudorandom inputs.
+\item \textbf{Counter:} The original checks counting after startup reset.
+The enhanced bench also checks that the output is zero during reset,
+reapplies reset after 50,000 increments, and verifies counting restarts
+from zero. A reference count checks the output every cycle.
+\end{itemize}
+Both benches use \texttt{\$fatal} to return a nonzero status on failure.
+Separate formal proofs cover all adder inputs and counter states, including
+wraparound; mapped simulation checks library integration.
 
-\subsection{4. Where does VCD activity come from, and what affects its power?}
-The VCD records signal changes while Verilator executes each synthesized
-netlist with the testbench stimuli. OpenSTA matches the correct
-\texttt{adder32\_testbench/dut} or \texttt{counter32\_testbench/dut} scope and
-uses annotated activity to estimate power. Random addition toggles many bits;
-counting has strongly unequal activity by bit position. Changing data patterns,
-input rate, reset fraction, simulated duration, dump coverage, or delay models
-changes the observed transition densities and hence switching/internal power.
-Leakage is less dependent on transition rate. A counter trace of roughly
-100,000 increments mostly exercises low bits, while higher bits rarely toggle;
-formal correctness coverage does not turn that workload into a full activity
-sample of all states. The short directed adder prelude is included in its VCD
-and is identical across comparisons. The raw VCD files and annotation logs
-are retained, rather than assuming every pin received valid activity.
+\subsection{Where does VCD activity come from, and what affects its power?}
+VCD (Value Change Dump) records signal values and the times at which they
+change. Verilator creates this file while simulating the mapped netlist
+with the testbench; OpenSTA reads the circuit's recorded activity to
+estimate power. The commands and settings mean:
+\begin{itemize}
+\item \texttt{\$dumpfile(vcd\_name)} selects the output filename;
+\texttt{vcd\_name} holds that filename.
+\item \texttt{\$dumpvars(0)} starts recording signals. The zero requests
+all levels of nested modules, including the circuit being tested.
+\item \texttt{next\_random} is a function that generates repeatable
+32-bit pseudorandom numbers for the adder inputs.
+\item \texttt{apply\_vector} is a task that sets the adder's two operands
+and carry-in, waits, and checks the outputs.
+\item \texttt{SAMPLE\_INTERVAL\_NS} sets the delay between adder tests:
+0.9855 ns, rounded to 0.986 ns by the simulator's time precision.
+\item \texttt{always \#5} toggles the counter clock every 5 ns, giving
+a 10 ns clock period.
+\end{itemize}
+Input patterns determine which signals switch. Shorter input intervals or
+clock periods usually increase dynamic power, the power associated with
+switching. Reset frequency and simulation length change the recorded
+workload; longer counter runs can capture rare changes in higher bits.
+The dump commands record activity rather than drive circuit inputs.
+
+\subsection{How did AI help with this assignment? (Optional)}
+AI helped me configure the experiment environment faster by explaining tool
+paths, dependencies, and build commands. It also helped me understand Verilog
+and digital circuit principles, especially carry propagation and the
+Kogge--Stone and Brent--Kung prefix networks. Step-by-step explanations
+connected RTL behavior to area and delay tradeoffs.
 
 \section{Quantitative questions}
-\subsection{1. Three slowest unique start/end pairs}
-Appendix A lists the three slowest distinct pairs for every configuration.
-The original longest-path report is capped at 1,000 paths and can be dominated
-by repeated routes for a single pair. A supplementary
-\texttt{timing-unique-paths.rpt} enumerates the worst path per reachable pair
-by querying each primary-input or register-output source separately.
-Paths are ordered by reported slack; with the zero-period timing run this
-captures the limiting timing requirement. A pair can appear more than once
-because STA enumerates different intervening cell/pin routes and rise/fall
-transitions; the same endpoints need not identify the same timing path.
-For counters, setup/capture timing contributes to the minimum cycle time,
-so data-arrival time alone need not equal the required period. No repeated
-pair is counted twice in the appendix's three-pair selection.
+\subsection{Three slowest unique start/end pairs}
+\hyperref[app:timing-paths]{Appendix~\ref*{app:timing-paths}} lists the three
+slowest distinct start/end pairs for all 18 configurations, ranked by the
+worst slack for each pair. A unique pair requires a distinct combination of
+startpoint and endpoint; sharing only the endpoint does not make two pairs
+the same.
 
-\subsection{2. Performance versus performance/area and energy}
-For each technology, the following table gives Pearson correlations between
-raw throughput and the other metrics across our three standalone adders.
-For energy, negative correlation means higher throughput accompanies lower
-energy. With only three designs these values are descriptive, not evidence
-of statistical significance or a general law.
+All 18 \texttt{sta/timing-longest-paths.rpt} files repeat pairs. Different
+gate/pin routes, rise/fall transitions, and conditional gate-delay models
+(delay cases depending on other inputs) can share the same endpoints.
+These conditions are not printed, so some entries can even have identical
+printed details.
+
+For example, the ASAP7 ripple-carry report's 1,000 entries all have
+\texttt{b[0]} $\rightarrow$ \texttt{sum[31]}. Querying each source separately
+in \texttt{timing-unique-paths.rpt} supplies the other pairs. Its three
+slowest distinct pairs are:
+
+
+\begin{center}\small
+\begin{tabular}{llrr}
+\toprule
+Startpoint & Endpoint & Delay (ns) & Original occurrences \\
+\midrule
+\texttt{b[0]} & \texttt{sum[31]} & 0.8077 & 1000 \\
+\texttt{cin} & \texttt{sum[31]} & 0.8063 & 0 \\
+\texttt{a[0]} & \texttt{sum[31]} & 0.8052 & 0 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Occurrences count entries in the original 1,000-path
+report; zero means a pair was absent from that capped list. Each pair is
+counted once when selecting the top three. Counter timing requirements also
+include flip-flop setup and capture timing.
+
+\subsection{Performance versus performance/area and energy}
+RCA, KS, and BK denote ripple-carry, Kogge--Stone, and Brent--Kung.
+Raw performance is the estimated maximum frequency $f=1/T$, where $T$ is
+the critical-path delay. Performance/area is $f/A$, where $A$ is mapped
+cell area; energy/operation is $E=PT$, where $P$ is total power.
+$E_{prob}$ uses OpenSTA's statistical switching model, and $E_{VCD}$ uses
+power estimated from simulated signal activity.
+
+Every library was evaluated with all three adders, giving nine individual
+results. The following table shows the values used for the correlations:
+
+
+\begin{center}\small
+\begin{tabular}{llrrrr}
+\toprule
+Technology & Adder & $f$ (GHz) & $f/A$ (MHz/$\mu m^2$) & $E_{prob}$ (fJ) & $E_{VCD}$ (fJ) \\
+\midrule
+ASAP7 (7 nm) & RCA & 1.238 & 109 & 22.51 & 22.11 \\
+ASAP7 (7 nm) & KS & 3.105 & 160.1 & 38.89 & 15.06 \\
+ASAP7 (7 nm) & BK & 2.404 & 152 & 31.93 & 15.27 \\
+Nangate45 (45 nm) & RCA & 0.5257 & 2.557 & 286.1 & 627.3 \\
+Nangate45 (45 nm) & KS & 1.637 & 5.857 & 356.4 & 255.7 \\
+Nangate45 (45 nm) & BK & 1.003 & 4.766 & 274 & 297.2 \\
+Sky130HD (130 nm) & RCA & 0.07764 & 0.09561 & 604.3 & 9469 \\
+Sky130HD (130 nm) & KS & 0.2935 & 0.2271 & 1224 & 5075 \\
+Sky130HD (130 nm) & BK & 0.2335 & 0.2145 & 1019 & 4909 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+
+For each technology, the next table gives the Pearson correlation coefficient
+$r$ between raw performance and each column's metric across the three
+adders within that library. Thus each row summarizes three adder results,
+rather than comparing the libraries with each other. Values near $+1$
+indicate that the quantities increase together; values near $-1$ indicate
+opposite trends; values near zero indicate little linear relationship.
 
 
 \begin{center}\small
 \begin{tabular}{lrrr}
 \toprule
-Technology & $r(f,f/A)$ & $r(f,E_{prob})$ & $r(f,E_{VCD})$ \\
+Technology & $r$: performance/area & $r$: prob. energy/op & $r$: VCD energy/op \\
 \midrule
 ASAP7 (7 nm) & 0.973 & 0.998 & -0.938 \\
 Nangate45 (45 nm) & 0.962 & 0.837 & -0.876 \\
@@ -264,47 +341,61 @@ Sky130HD (130 nm) & 0.983 & 0.998 & -0.954 \\
 \end{tabular}
 \end{center}
 
-\textbf{ASAP7 (7 nm)}: throughput order: Kogge--Stone, Brent--Kung, Ripple-carry; performance/area order: Kogge--Stone, Brent--Kung, Ripple-carry. Lowest probabilistic energy: Ripple-carry; lowest VCD energy: Kogge--Stone.
+\begin{itemize}
+\item \textbf{Performance/area:} Strong positive correlation at all three
+nodes. Faster adders generally provide more performance per unit area.
+\item \textbf{Probabilistic energy:} Nearly perfect positive correlation
+at 7 and 130 nm, and a less close positive relationship at 45 nm. Faster
+adders tend to have higher energy/operation under this model.
+\item \textbf{VCD energy:} Strong negative correlation at all three nodes.
+Faster adders tend to have lower calculated $P_{VCD}T$.
+\end{itemize}
+These are overall trends across three designs, not a guarantee for every
+pair. The energy models use different activity rates: probabilistic power
+uses each minimum period, while VCD inputs have a fixed rate. Thus
+$E_{VCD}=P_{VCD}T$ is the assignment's derived metric, rather than energy
+measured per VCD test vector.
 
-\textbf{Nangate45 (45 nm)}: throughput order: Kogge--Stone, Brent--Kung, Ripple-carry; performance/area order: Kogge--Stone, Brent--Kung, Ripple-carry. Lowest probabilistic energy: Brent--Kung; lowest VCD energy: Kogge--Stone.
-
-\textbf{Sky130HD (130 nm)}: throughput order: Kogge--Stone, Brent--Kung, Ripple-carry; performance/area order: Kogge--Stone, Brent--Kung, Ripple-carry. Lowest probabilistic energy: Ripple-carry; lowest VCD energy: Brent--Kung.
-
-A faster design can spend more area and draw more power, so the best
-raw delay need not maximize $f/A$ or minimize $PT$. The probability model's
-activity rate scales with $1/T$, while the VCD workload rate is fixed; energy
-rankings can consequently differ between power models.
-
-\subsection{3. Does architecture improvement scale equally at 7 and 130 nm?}
-
-
-\begin{center}\small
-\begin{tabular}{lllrrr}
-\toprule
-Technology & Fastest & Slowest & Fast/slow speedup & KS/RCA & BK/RCA \\
-\midrule
-ASAP7 (7 nm) & Kogge--Stone & Ripple-carry & 2.508 & 2.508 & 1.942 \\
-Nangate45 (45 nm) & Kogge--Stone & Ripple-carry & 3.115 & 3.115 & 1.907 \\
-Sky130HD (130 nm) & Kogge--Stone & Ripple-carry & 3.781 & 3.781 & 3.008 \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-The measured fastest/slowest speedup is 2.508 at 7 nm and 3.781 at 130 nm. The 7 nm speedup factor differs from the 130 nm factor by -33.67 percent, relative to the 130 nm factor. The architecture benefit does not scale equally between these nodes. These ratios, rather than absolute delay, show the relative architecture benefit.
-Technology libraries differ in relative XOR and AND/OR delays, complex-gate
-availability, drive strengths, fanout sensitivity, and ABC mapping choices.
-The same prefix equations can map to different gate chains. Faster processes
-therefore do not uniformly scale every architecture by the same factor.
-Our flow has no routed-wire extraction, so wire-layout explanations remain
-hypotheses rather than measured causes here.
-
-\subsection{4. Discrepancy between 7 nm counter power estimates}
+\subsection{Does architecture improvement scale equally at 7 and 130 nm?}
+Kogge--Stone is the fastest adder and ripple-carry the slowest in these
+libraries. For each technology, architecture speedup is
+$S=f_{adder}/f_{RCA}=T_{RCA}/T_{adder}$: it compares architectures within
+that technology. The frequency columns show absolute performance.
 
 
 \begin{center}\small
 \begin{tabular}{lrrrr}
 \toprule
-Architecture & $P_{prob}$ ($\mu W$) & $P_{VCD}$ ($\mu W$) & $|\Delta P|$ ($\mu W$) & $|\Delta P|/P_{prob}$ (\%) \\
+Technology & $f_{RCA}$ (GHz) & $f_{KS}$ (GHz) & KS/RCA speedup & BK/RCA speedup \\
+\midrule
+ASAP7 (7 nm) & 1.238 & 3.105 & 2.508 & 1.942 \\
+Nangate45 (45 nm) & 0.5257 & 1.637 & 3.115 & 1.907 \\
+Sky130HD (130 nm) & 0.07764 & 0.2935 & 3.781 & 3.008 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Kogge--Stone is 2.508 times faster than ripple-carry at 7 nm and 3.781 times faster at 130 nm. The 7 nm speedup factor is 33.67 percent lower. The relative benefits therefore differ between nodes. All three adders have higher absolute performance at 7 nm in
+these STA results; a larger relative gain at 130 nm does not make its
+adders faster than their 7 nm counterparts.
+
+RCA propagates carries through a serial chain, while KS uses parallel
+prefix logic. These structures use different gate types and numbers of
+loads driven by each gate. Library delay/load models and synthesis cell
+choices differ, so both architectures need not speed up by the same factor
+between libraries. These are plausible reasons for the discrepancy;
+routed-wire effects were not measured.
+
+\subsection{Discrepancy between 7 nm counter power estimates}
+Here ``discrepancy'' means the absolute gap
+$D=|P_{prob}-P_{VCD}|$. The table also reports the relative gap
+$100D/P_{prob}$ as a percentage.
+
+
+\begin{center}\small
+\begin{tabular}{lrrrr}
+\toprule
+Architecture & $P_{prob}$ ($\mu W$) & $P_{VCD}$ ($\mu W$) & Absolute gap ($\mu W$) & Relative gap (\%) \\
 \midrule
 Ripple-carry & 110.3 & 97.61 & 12.73 & 11.54 \\
 Kogge--Stone & 124.1 & 109.8 & 14.3 & 11.52 \\
@@ -313,85 +404,79 @@ Brent--Kung & 117.1 & 103.7 & 13.39 & 11.43 \\
 \end{tabular}
 \end{center}
 
-By absolute difference, the smallest discrepancy is Ripple-carry and the largest is Kogge--Stone. By relative difference, the smallest is Brent--Kung and the largest is Ripple-carry.
+The absolute gap is smallest for Ripple-carry (12.73 $\mu W$) and largest for Kogge--Stone (14.30 $\mu W$). The relative gap is smallest for Brent--Kung (11.43\%) and largest for Ripple-carry (11.54\%).
 
-Probabilistic input activity and propagated statistical assumptions differ
-from the correlated binary-count sequence. Counter high bits rarely toggle,
-the VCD covers only a finite counting interval, and reset changes the activity.
-The statistical power run uses each minimum period while the VCD clock is
-10 ns. Clocked cell/internal power can therefore dominate the discrepancy.
-Library internal/leakage power models, and functional simulation's limited
-glitch information, are additional model differences. Constant $b=0$, $cin=1$,
-and unused carry-out also allow synthesis to simplify an adder into an incrementer.
+All three relative gaps are about 11.5 percent, with only 0.10 percentage points between the smallest and largest. The main observation is a consistent difference between estimation methods, with little variation across counter architectures.
 
-\subsection{5. Counter area devoted to sequential elements}
-Sequential area is computed from mapped sequential-cell counts times each
-cell's Liberty area, then divided by total mapped area. A cell is identified
-as sequential through its Liberty \texttt{ff}/\texttt{latch} definition,
-rather than its name alone.
+Reasons for the discrepancies include:
+\begin{itemize}
+\item \textbf{Activity assumptions:} The statistical run assumes input
+activity of 0.2 transitions per minimum period. The VCD records actual
+binary counting, where bit changes and carry propagation are correlated.
+\item \textbf{Finite workload and reset:} Each counting segment stops at
+50,000, so bits 16--31 remain zero. Reset changes only a few times. These
+patterns differ from statistical activity assumptions.
+\item \textbf{Activity rates:} The VCD records a 10 ns clock, while both
+STA runs retain minimum-period clock constraints. The recorded data
+activity and statistical estimates therefore use different rate assumptions.
+\end{itemize}
+These differences affect internal and switching power estimates.
+
+\subsection{Counter area devoted to sequential elements}
+The final statistics in \texttt{synth/stdout.log} report total cell area
+$A_{total}$ and sequential area $A_{seq}$. Every counter has 32 mapped
+flip-flops, which store its 32-bit count. The sequential share is
+$100 A_{seq}/A_{total}$ percent.
 
 
 \begin{center}\small
-\begin{tabular}{llrrrr}
+\begin{tabular}{lrrrr}
 \toprule
-Technology & Architecture & Seq. cells & $A_{seq}$ ($\mu m^2$) & $A_{total}$ ($\mu m^2$) & Seq. area (\%) \\
+Technology & $A_{seq}$ ($\mu m^2$) & RCA share (\%) & KS share (\%) & BK share (\%) \\
 \midrule
-ASAP7 (7 nm) & Ripple-carry & 32 & 11.66 & 18.56 & 62.84 \\
-ASAP7 (7 nm) & Kogge--Stone & 32 & 11.66 & 18.62 & 62.65 \\
-ASAP7 (7 nm) & Brent--Kung & 32 & 11.66 & 18.34 & 63.59 \\
-Nangate45 (45 nm) & Ripple-carry & 32 & 144.7 & 240.5 & 60.18 \\
-Nangate45 (45 nm) & Kogge--Stone & 32 & 144.7 & 246.6 & 58.68 \\
-Nangate45 (45 nm) & Brent--Kung & 32 & 144.7 & 241 & 60.04 \\
-Sky130HD (130 nm) & Ripple-carry & 32 & 640.6 & 1150 & 55.71 \\
-Sky130HD (130 nm) & Kogge--Stone & 32 & 640.6 & 1149 & 55.77 \\
-Sky130HD (130 nm) & Brent--Kung & 32 & 640.6 & 1150 & 55.71 \\
+ASAP7 (7 nm) & 11.66 & 62.84 & 62.65 & 63.59 \\
+Nangate45 (45 nm) & 144.7 & 60.18 & 58.68 & 60.04 \\
+Sky130HD (130 nm) & 640.6 & 55.71 & 55.77 & 55.71 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-ASAP7 (7 nm): sequential share ranges from 62.65 to 63.59 percent (spread 0.95 percentage points).
+\textbf{Across adder designs:} The ratio is approximately consistent within each technology; the largest spread is 1.49 percentage points. All three counters use the same 32 flip-flop cells within a library.
+With $b=0$ and $cin=1$, synthesis simplifies each adder into an incrementer
+(adds one). Small differences in the remaining combinational logic area
+account for the slight ratio changes.
 
-Nangate45 (45 nm): sequential share ranges from 58.68 to 60.18 percent (spread 1.49 percentage points).
+\textbf{Across technology nodes:} The ratio changes and is higher
+at 7 nm than at 130 nm in these results. Each library has different relative
+areas for flip-flops and logic gates, and synthesis maps the logic differently.
+Keeping 32 flip-flops therefore does not keep their share of total area constant.
 
-Sky130HD (130 nm): sequential share ranges from 55.71 to 55.77 percent (spread 0.06 percentage points).
+\section{Rebuild guide}
+GitHub repository: \url{https://github.com/Colossus-MKII/cs505-f26-lab1}.
 
-Across all counters the share ranges from 55.71 to 63.59 percent. The largest within-node spread is 1.49 percentage points; the total cross-design/node spread is 7.88 percentage points. The ratio is therefore not constant across all designs and technologies.
-
-The architectural state is always 32 bits, but the fraction is determined
-by flip-flop area relative to combinational increment/reset logic. Different
-adder structures and synthesis simplifications can change the denominator;
-different technologies change both flop and logic cell areas. Thus a constant
-state-bit count alone does not imply a constant area ratio. The measured table
-shows how closely that ratio agrees in each library.
-
-\section{Reproduction and artifacts}
-From the repository root run \texttt{python3 scripts/run\_experiments.py --force}.
-It runs RTL simulation and formal verification, builds all 18 configurations,
-validates/parses the reports, generates plots and this PDF, and creates
-\texttt{submission.zip} containing the two new RTL files and \texttt{report.pdf}.
-The optional \texttt{--skip-build} regenerates analysis/report from existing
-builds; it still reruns RTL checks. A fresh build needs the supplied ilab tool
-and library paths, Icarus, Python with NumPy/Matplotlib, and pdfLaTeX.
-\texttt{build/build-manifest.json} records executable versions, exact commands,
-the original repository revision, and SHA-256 hashes of input source/library
-files. Per-target configuration files record build settings. The raw netlists,
-STA reports, simulation logs, VCDs, and proof logs remain under \texttt{build/}.
-\texttt{results/results.json}, \texttt{results/results.csv}, and figures are
-regenerable auxiliary files. No remote submission was performed.
+Use the complete project checkout on ilab, with the environment described
+in the assignment handout.
+\begin{enumerate}
+\item Open the project directory:
+\begin{Verbatim}[fontsize=\small]
+cd cs505-f26-lab1
+\end{Verbatim}
+\item Rebuild all experiments:
+\begin{Verbatim}[fontsize=\small]
+python3 scripts/run_experiments.py --force
+\end{Verbatim}
+This checks RTL correctness, synthesizes and simulates all 18 configurations,
+and analyzes timing, area, and both power estimates.
+\item \texttt{submission.zip} contains the two new adder files,
+the two enhanced testbench files, and \texttt{report.pdf}. Data and plots are in
+\texttt{results/}; synthesis, simulation, and STA reports are in \texttt{build/}.
+\end{enumerate}
 
 
-\textbf{Recorded tool versions:}
-
-yosys: Yosys 0.69+75 (git sha1 f0b945f63, Release, GNU /usr/bin/c++ 13.3.0)\par
-
-opensta: 3.1.0\par
-
-verilator: Verilator 5.053 devel rev v5.052-119-g014c9820d\par
-
-iverilog: Icarus Verilog version 12.0 (stable) ()\par
-
-\appendix
-\section{Three slowest unique endpoint pairs for every configuration}
+\section{Appendix}
+\renewcommand{\thesubsection}{\Alph{subsection}}
+\subsection{Three slowest unique endpoint pairs for every configuration}
+\label{app:timing-paths}
 Names are copied from each \texttt{sta/timing-unique-paths.rpt}. The table
 reports the magnitude of worst slack normalized to ns (the timing requirement)
 and the number of occurrences of that endpoint pair in the original capped
@@ -399,7 +484,7 @@ and the number of occurrences of that endpoint pair in the original capped
 the first 1,000 raw paths, although it is present in the complete unique-pair report.
 
 
-\subsection{adder32: Ripple-carry, ASAP7 (7 nm)}
+\subsubsection{adder32: Ripple-carry, ASAP7 (7 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -411,7 +496,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{adder32: Kogge--Stone, ASAP7 (7 nm)}
+\subsubsection{adder32: Kogge--Stone, ASAP7 (7 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -423,7 +508,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{adder32: Brent--Kung, ASAP7 (7 nm)}
+\subsubsection{adder32: Brent--Kung, ASAP7 (7 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -435,7 +520,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{adder32: Ripple-carry, Nangate45 (45 nm)}
+\subsubsection{adder32: Ripple-carry, Nangate45 (45 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -447,7 +532,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{adder32: Kogge--Stone, Nangate45 (45 nm)}
+\subsubsection{adder32: Kogge--Stone, Nangate45 (45 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -459,7 +544,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{adder32: Brent--Kung, Nangate45 (45 nm)}
+\subsubsection{adder32: Brent--Kung, Nangate45 (45 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -471,7 +556,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{adder32: Ripple-carry, Sky130HD (130 nm)}
+\subsubsection{adder32: Ripple-carry, Sky130HD (130 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -483,7 +568,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{adder32: Kogge--Stone, Sky130HD (130 nm)}
+\subsubsection{adder32: Kogge--Stone, Sky130HD (130 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -495,7 +580,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{adder32: Brent--Kung, Sky130HD (130 nm)}
+\subsubsection{adder32: Brent--Kung, Sky130HD (130 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -507,7 +592,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{counter32: Ripple-carry, ASAP7 (7 nm)}
+\subsubsection{counter32: Ripple-carry, ASAP7 (7 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -519,7 +604,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{counter32: Kogge--Stone, ASAP7 (7 nm)}
+\subsubsection{counter32: Kogge--Stone, ASAP7 (7 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -531,7 +616,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{counter32: Brent--Kung, ASAP7 (7 nm)}
+\subsubsection{counter32: Brent--Kung, ASAP7 (7 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -543,7 +628,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{counter32: Ripple-carry, Nangate45 (45 nm)}
+\subsubsection{counter32: Ripple-carry, Nangate45 (45 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -555,7 +640,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{counter32: Kogge--Stone, Nangate45 (45 nm)}
+\subsubsection{counter32: Kogge--Stone, Nangate45 (45 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -567,7 +652,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{counter32: Brent--Kung, Nangate45 (45 nm)}
+\subsubsection{counter32: Brent--Kung, Nangate45 (45 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -579,7 +664,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{counter32: Ripple-carry, Sky130HD (130 nm)}
+\subsubsection{counter32: Ripple-carry, Sky130HD (130 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -591,7 +676,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{counter32: Kogge--Stone, Sky130HD (130 nm)}
+\subsubsection{counter32: Kogge--Stone, Sky130HD (130 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -603,7 +688,7 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\subsection{counter32: Brent--Kung, Sky130HD (130 nm)}
+\subsubsection{counter32: Brent--Kung, Sky130HD (130 nm)}
 
 \begin{tabularx}{\linewidth}{XXrr}\toprule Startpoint & Endpoint & Requirement (ns) & Occurrences \\ \midrule
 
@@ -615,13 +700,13 @@ the first 1,000 raw paths, although it is present in the complete unique-pair re
 
 \bottomrule\end{tabularx}
 
-\section{Both definitions of the requested efficiency metric}
+\subsection{Both definitions of the requested efficiency metric}
 Here $T/P$ is the handout's literal quantity in s/W. Throughput/W is the
 conventional $1/(TP)$, shown in trillions of operations per joule (TOp/J).
 The complete CSV also contains throughput, performance/area, and both energies.
 
 
-\subsection{adder32}
+\subsubsection{adder32}
 
 \begin{center}\small
 \begin{tabular}{llrrrr}
@@ -641,7 +726,7 @@ Sky130HD (130 nm) & Brent--Kung & 1.8e-05 & 3.735e-06 & 0.9815 & 0.2037 \\
 \end{tabular}
 \end{center}
 
-\subsection{counter32}
+\subsubsection{counter32}
 
 \begin{center}\small
 \begin{tabular}{llrrrr}
@@ -660,5 +745,55 @@ Sky130HD (130 nm) & Brent--Kung & 7.911e-06 & 8.023e-06 & 0.7358 & 0.7462 \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\clearpage
+\subsection{Testbenches and verification}
+\label{app:testbenches}
+The two enhanced testbench source files are included in \texttt{submission.zip}.
+Place them at the following paths in the project checkout:
+\begin{itemize}
+\item \nolinkurl{src/adder32/adder32-testbench.v}
+\item \nolinkurl{src/counter32/counter32-testbench.v}
+\end{itemize}
+Both benches check outputs automatically and terminate with a nonzero status
+on failure. The rebuild command in Section 5 runs both against every RTL
+architecture and every mapped configuration.
+
+\subsubsection{Adder testbench}
+\texttt{adder32-testbench.v} checks all 33 result bits, including carry-out.
+It uses 106 directed cases and 100,000 deterministic pseudorandom cases
+with seed \texttt{0x505f2601}. The directed cases cover carry chains,
+overflow, and both carry-in values. Its 0.9855 ns stimulus interval rounds
+to 986 ps at the declared 1 ps precision.
+
+\subsubsection{Counter testbench}
+\texttt{counter32-testbench.v} checks 100,000 increments against a reference
+count, plus startup reset and reset during counting. It uses a 10 ns clock
+and checks four reset cycles. Two counting segments of 50,000 increments
+verify that counting restarts correctly after reset.
+
+These workloads generated the VCD activity used for the reported power
+estimates. Verilator simulates the mapped netlists with these same benches;
+\texttt{+vcd=filename.vcd} enables waveform dumping for OpenSTA.
+
+
+\subsubsection{Compatibility with the original instructor benches}
+
+The original bench files were recovered without edits from course repository revision \texttt{92a4172}. Verilator ran each original bench against the current standalone RTL of both submitted adders. All four checks passed. This is separate from the 18 technology-mapped simulations using the enhanced benches.
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+Architecture & Original testbench & Result \\
+\midrule
+Brent--Kung & adder32 & PASS \\
+Brent--Kung & counter32 & PASS \\
+Kogge--Stone & adder32 & PASS \\
+Kogge--Stone & counter32 & PASS \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Exact commands, source hashes, and logs are recorded in \texttt{build/original-testbenches/verification.json}.
 
 \end{document}

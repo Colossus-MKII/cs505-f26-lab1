@@ -18,7 +18,7 @@ From this directory on ilab:
 The script verifies all three architectures with Yosys SAT and Icarus, builds
 all 18 configurations (3 adders x 2 circuits x 3 real technologies), validates
 and extracts PPA results, plots comparisons, generates report.pdf, and packages
-the required two new Verilog files and report into submission.zip.
+the two new Verilog files, report, and two enhanced testbenches into submission.zip.
 It requires the course's shared Yosys/OpenSTA/Verilator and technology files,
 Icarus Verilog, Python with NumPy/Matplotlib, and pdfLaTeX. These are available
 in the provided ilab environment. --jobs controls simultaneous target builds
@@ -54,7 +54,13 @@ SHA-256 hashes of source and library inputs. Each target also has .config.json.
 results/results.csv and results/results.json contain the full measured data.
 results/*-comparison.pdf/.png contain comparison plots.
 results/report.tex and results/report-build.log reproduce report.pdf.
-submission.zip contains exactly the three required submission files.
+submission.zip contains five files: adder32-kogge-stone.v,
+adder32-brent-kung.v, report.pdf, adder32-testbench.v, and counter32-testbench.v.
+testbenches.zip also contains the two enhanced testbenches for convenience.
+report.pdf Appendix C summarizes their checks and the stimulus settings used
+for every reported VCD-power experiment; the complete source is in the archives.
+The instructor's original benches are a separate compatibility check; using
+their different stimulus can produce different VCD power estimates.
 
 The user-provided updated handout screenshot strikes out the official-template
 CSV instruction. The CSV here uses explicit local headers and is an auxiliary
@@ -80,5 +86,6 @@ transition/reset proof starts from an arbitrary 32-bit state, covering wraparoun
 as well as synchronous reset. The enhanced RTL benches also run with Icarus's
 four-state simulation, alongside each mapped netlist's Verilator simulation.
 
-Review report.pdf and the two new adders before your own Gradescope submission.
+Review report.pdf, the two new adders, and both testbenches before your own
+Gradescope submission.
 This workspace workflow does not send or upload the assignment anywhere.
